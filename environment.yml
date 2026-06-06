@@ -1,0 +1,9 @@
+name: ai-biopython-gui
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - streamlit
+  - biopython
+  - requests
