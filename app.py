@@ -2,6 +2,8 @@
 """Main entry point for the AI Biopython GUI application."""
 
 import streamlit as st
+from core.input import parse_fasta_file, fetch_from_ncbi
+from core.analysis import calculate_gc_content
 
 
 # Page configuration — must be the first Streamlit command
@@ -39,6 +41,25 @@ with col2:
 
 st.divider()
 
-# Results placeholder — replaced with actual data once input is provided
+
+# Results section — displays metadata extracted from the sequence
 st.subheader("Results")
-st.info("Upload a FASTA file or fetch a sequence to see results here.")
+
+if uploaded_file is not None:
+    records = parse_fasta_file(uploaded_file)
+    if records is None:
+        st.error("Could not parse the uploaded file. Please upload a valid FASTA file.")
+    else:
+        gc = calculate_gc_content(records[0])
+        st.success(f"GC Content: {gc}%")
+
+elif fetch_button and accession_number:
+    records = fetch_from_ncbi(accession_number)
+    if records is None:
+        st.error("Could not fetch sequence. Please check the accession number and try again.")
+    else:
+        gc = calculate_gc_content(records[0])
+        st.success(f"GC Content: {gc}%")
+
+else:
+    st.info("Upload a FASTA file or fetch a sequence to see results here.")
