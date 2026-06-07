@@ -1,4 +1,4 @@
-name: ai-biopython-gui
+name: biopyai
 channels:
   - conda-forge
   - defaults
