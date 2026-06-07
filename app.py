@@ -14,8 +14,8 @@ st.set_page_config(
 )
 
 # Application header
-st.title("🧬 AI Biopython GUI")
-st.markdown("A computational biology tool for life science researchers.")
+st.title("🧬 BioPyAI")
+st.markdown("A hybrid AI application for computational biology, combining deterministic sequence analysis with language model reasoning to assist life science researchers.")
 
 st.divider()
 

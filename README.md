@@ -1,6 +1,6 @@
 # BioPyAI 🧬
 
-A hybrid AI application for computational biology, combining deterministic sequence analysis with large language model reasoning to assist life science researchers.
+A hybrid AI application for computational biology, combining deterministic sequence analysis with language model reasoning to assist life science researchers.
 
 ---
 
