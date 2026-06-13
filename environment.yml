@@ -7,3 +7,4 @@ dependencies:
   - streamlit
   - biopython
   - requests
+  - ollama-python
