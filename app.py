@@ -1,21 +1,46 @@
 #!/usr/bin/env python3
-"""Main entry point for the AI Biopython GUI application."""
+"""Main entry point for the BioPyAI application."""
 
 import streamlit as st
+
 from core.input import parse_fasta_file, fetch_from_ncbi
 from core.analysis import calculate_gc_content
+from core.llm import interpret
+
+
+# Maps the intelligence layer's error codes to user-facing messages.
+# Keeping this in the UI layer means llm.py stays free of presentation
+# concerns — it reports what failed, app.py decides how to say it.
+LLM_ERROR_MESSAGES = {
+    "service_down": (
+        "Could not reach the local AI service. Make sure Ollama is "
+        "running (try `ollama serve` in a terminal)."
+    ),
+    "model_missing": (
+        "The Phi-4 model isn't available. Download it with "
+        "`ollama pull phi4`."
+    ),
+    "request_failed": (
+        "The interpretation request failed. Please try again — if the "
+        "sequence is very long, it may have timed out."
+    ),
+}
 
 
 # Page configuration — must be the first Streamlit command
 st.set_page_config(
-    page_title="AI Biopython GUI",
+    page_title="BioPyAI",
     page_icon="🧬",
     layout="wide"
 )
 
 # Application header
 st.title("🧬 BioPyAI")
-st.markdown("A hybrid AI application for computational biology, combining deterministic sequence analysis with language model reasoning to assist life science researchers.")
+st.markdown(
+    "A hybrid AI application for computational biology, combining "
+    "deterministic sequence analysis with language model reasoning to "
+    "assist life science researchers."
+)
 
 st.divider()
 
@@ -41,25 +66,53 @@ with col2:
 
 st.divider()
 
-
-# Results section — displays metadata extracted from the sequence
-st.subheader("Results")
+# --- Input handling ---------------------------------------------------
+# When a sequence is loaded, compute GC content and store it in session
+# state so it survives the re-runs triggered by later button clicks.
 
 if uploaded_file is not None:
     records = parse_fasta_file(uploaded_file)
     if records is None:
         st.error("Could not parse the uploaded file. Please upload a valid FASTA file.")
     else:
-        gc = calculate_gc_content(records[0])
-        st.success(f"GC Content: {gc}%")
+        st.session_state["gc_content"] = calculate_gc_content(records[0])
 
 elif fetch_button and accession_number:
     records = fetch_from_ncbi(accession_number)
     if records is None:
         st.error("Could not fetch sequence. Please check the accession number and try again.")
     else:
-        gc = calculate_gc_content(records[0])
-        st.success(f"GC Content: {gc}%")
+        st.session_state["gc_content"] = calculate_gc_content(records[0])
+
+# --- Results and interpretation ---------------------------------------
+st.subheader("Results")
+
+# Only show results if a sequence has been loaded this session
+if "gc_content" in st.session_state:
+    gc = st.session_state["gc_content"]
+    st.success(f"GC Content: {gc}%")
+
+    st.divider()
+    st.subheader("AI Interpretation")
+
+    # Optional question from the researcher
+    user_question = st.text_input(
+        "Ask a question about this sequence (optional)",
+        placeholder="e.g. What might this GC content suggest?"
+    )
+
+    # On-demand: only run Phi-4 when the user explicitly asks for it
+    if st.button("Interpret with Phi-4"):
+        with st.spinner("Phi-4 is interpreting the result..."):
+            result = interpret(gc, user_question or None)
+
+        if result.success:
+            st.markdown(result.content)
+        else:
+            message = LLM_ERROR_MESSAGES.get(
+                result.error, "An unexpected error occurred."
+            )
+            st.error(message)
 
 else:
     st.info("Upload a FASTA file or fetch a sequence to see results here.")
