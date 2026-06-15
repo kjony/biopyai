@@ -140,32 +140,42 @@ if "analyses" in st.session_state:
             label_col.markdown(f"**{label}**")
             value_col.write(value)
 
-    # Computed analyses
-    st.subheader("Analysis")
+    # Fetch the GC value once; both panels below use it.
     gc = st.session_state["analyses"]["GC content"]
-    st.success(f"GC Content: {gc}%")
 
-    st.divider()
-    st.subheader("AI Interpretation")
+    # Analysis (left) and AI interpretation (right), side by side —
+    # deterministic result paired with language-model reasoning.
+    analysis_col, interp_col = st.columns(2)
 
-    # Optional question from the researcher
-    user_question = st.text_input(
-        "Ask a question about this sequence (optional)",
-        placeholder="e.g. What might this GC content suggest?"
-    )
+    with analysis_col:
+        st.subheader("Analysis")
+        st.caption("Deterministic sequence metrics")
+        st.success(f"GC Content: {gc}%")
 
-    # On-demand: only run Phi-4 when the user explicitly asks for it
-    if st.button("Interpret with Phi-4"):
-        with st.spinner("Phi-4 is interpreting the result..."):
-            result = interpret(gc, user_question or None)
+    with interp_col:
+        st.subheader("AI Interpretation")
+        st.caption("Ask Phi-4 to interpret the result (optional)")
 
-        if result.success:
-            st.markdown(result.content)
-        else:
-            message = LLM_ERROR_MESSAGES.get(
-                result.error, "An unexpected error occurred."
-            )
-            st.error(message)
+        # Optional question from the researcher. Label is collapsed so the
+        # input aligns with the Analysis panel; guidance sits in the caption.
+        user_question = st.text_input(
+            "Question for Phi-4",
+            placeholder="e.g. What might this GC content suggest?",
+            label_visibility="collapsed",
+        )
+
+        # On-demand: only run Phi-4 when the user explicitly asks for it
+        if st.button("Interpret with Phi-4"):
+            with st.spinner("Phi-4 is interpreting the result..."):
+                result = interpret(gc, user_question or None)
+
+            if result.success:
+                st.markdown(result.content)
+            else:
+                message = LLM_ERROR_MESSAGES.get(
+                    result.error, "An unexpected error occurred."
+                )
+                st.error(message)
 
 else:
     st.info("Upload a FASTA file or fetch a sequence to see results here.")
