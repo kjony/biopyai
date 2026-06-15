@@ -27,6 +27,29 @@ LLM_ERROR_MESSAGES = {
 }
 
 
+def load_sequence(record):
+    """Populate session state from a parsed SeqRecord.
+
+    Stores two collections, deliberately shaped so that future metadata
+    fields and additional analyses extend them rather than restructure
+    them:
+
+      - sequence_meta: descriptive identity of the loaded sequence
+      - analyses:      a label -> value map of computed results
+
+    Only GC content is computed today, but the collection shape means a
+    second or third analysis is an added entry, not a rewrite.
+    """
+    st.session_state["sequence_meta"] = {
+        "id": record.id,
+        "description": record.description,
+        "length": len(record.seq),
+    }
+    st.session_state["analyses"] = {
+        "GC content": calculate_gc_content(record),
+    }
+
+
 # Page configuration — must be the first Streamlit command
 st.set_page_config(
     page_title="BioPyAI",
@@ -67,29 +90,36 @@ with col2:
 st.divider()
 
 # --- Input handling ---------------------------------------------------
-# When a sequence is loaded, compute GC content and store it in session
-# state so it survives the re-runs triggered by later button clicks.
+# When a sequence is loaded, store its metadata and computed analyses in
+# session state (via load_sequence) so they survive the re-runs triggered
+# by later button clicks.
 
 if uploaded_file is not None:
     records = parse_fasta_file(uploaded_file)
     if records is None:
-        st.error("Could not parse the uploaded file. Please upload a valid FASTA file.")
+        st.error(
+            "Could not parse the uploaded file. "
+            "Please upload a valid FASTA file."
+        )
     else:
-        st.session_state["gc_content"] = calculate_gc_content(records[0])
+        load_sequence(records[0])
 
 elif fetch_button and accession_number:
     records = fetch_from_ncbi(accession_number)
     if records is None:
-        st.error("Could not fetch sequence. Please check the accession number and try again.")
+        st.error(
+            "Could not fetch sequence. Please check the "
+            "accession number and try again."
+        )
     else:
-        st.session_state["gc_content"] = calculate_gc_content(records[0])
+        load_sequence(records[0])
 
 # --- Results and interpretation ---------------------------------------
 st.subheader("Results")
 
 # Only show results if a sequence has been loaded this session
-if "gc_content" in st.session_state:
-    gc = st.session_state["gc_content"]
+if "analyses" in st.session_state:
+    gc = st.session_state["analyses"]["GC content"]
     st.success(f"GC Content: {gc}%")
 
     st.divider()
