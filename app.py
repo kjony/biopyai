@@ -65,19 +65,42 @@ st.markdown(
     "assist life science researchers."
 )
 
-# --- Input stage ------------------------------------------------------
-# The input lives in an expander beneath the "Sequence Input" heading.
-# Before a sequence is loaded the expander defaults open; once a sequence
-# is loaded it defaults closed and recedes so the analysis/interpretation
-# phase takes focus. The user can still open or close it manually.
-st.subheader("Sequence Input")
-
+# Whether a sequence is loaded as this run begins. Computed here so the
+# reset control and the input/results sections below all read a single,
+# consistent value.
 sequence_loaded = "analyses" in st.session_state
+
+# --- Input stage ------------------------------------------------------
+# The "Sequence Input" heading carries a Reset button on its right, shown
+# only when a sequence is loaded. Reset clears state before the input and
+# results sections run below, so a single pass reflects it — no rerun.
+# The input itself lives in an expander that defaults open when nothing is
+# loaded and recedes once a sequence is loaded.
+title_col, reset_col = st.columns([6, 1], vertical_alignment="bottom")
+
+with title_col:
+    st.subheader("Sequence Input")
+
+with reset_col:
+    if sequence_loaded and st.button("Reset"):
+        for key in ("analyses", "sequence_meta"):
+            st.session_state.pop(key, None)
+        # Bump the input generation so the uploader/accession box
+        # re-instantiate empty (session-state alone can't clear a
+        # lingering upload).
+        st.session_state["input_gen"] = (
+            st.session_state.get("input_gen", 0) + 1
+        )
+        sequence_loaded = False
 
 input_label = (
     "Load a different sequence" if sequence_loaded
     else "Provide a sequence"
 )
+
+# Generation counter — changing it re-instantiates the input widgets as
+# empty, which is how Reset clears a lingering upload.
+input_gen = st.session_state.get("input_gen", 0)
 
 with st.expander(input_label, expanded=not sequence_loaded):
     upload_col, fetch_col = st.columns(2)
@@ -88,6 +111,7 @@ with st.expander(input_label, expanded=not sequence_loaded):
             "Choose a FASTA file",
             type=["fasta", "fa", "txt"],
             label_visibility="collapsed",
+            key=f"upload_{input_gen}",
         )
 
     with fetch_col:
@@ -96,12 +120,17 @@ with st.expander(input_label, expanded=not sequence_loaded):
             "Enter an accession number",
             placeholder="e.g. NM_000546",
             label_visibility="collapsed",
+            key=f"accession_{input_gen}",
         )
         fetch_button = st.button("Fetch Sequence")
 
 # --- Input handling ---------------------------------------------------
 # When a sequence is loaded, store its metadata and computed analyses in
 # session state (via load_sequence) so they survive later re-runs.
+
+# Normalize the typed accession once, so stray whitespace neither passes
+# the fetch guard nor gets sent to NCBI.
+accession = accession_number.strip()
 
 if uploaded_file is not None:
     records = parse_fasta_file(uploaded_file)
@@ -113,8 +142,8 @@ if uploaded_file is not None:
     else:
         load_sequence(records[0])
 
-elif fetch_button and accession_number:
-    records = fetch_from_ncbi(accession_number)
+elif fetch_button and accession:
+    records = fetch_from_ncbi(accession)
     if records is None:
         st.error(
             "Could not fetch sequence. Please check the "
