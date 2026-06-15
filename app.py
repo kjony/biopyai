@@ -115,10 +115,33 @@ elif fetch_button and accession_number:
         load_sequence(records[0])
 
 # --- Results and interpretation ---------------------------------------
-st.subheader("Results")
 
-# Only show results if a sequence has been loaded this session
 if "analyses" in st.session_state:
+    meta = st.session_state["sequence_meta"]
+
+    # Sequence summary card — renders the identity metadata stored on
+    # load. Purely presentational: no new extraction logic, it reads
+    # what load_sequence() already placed in session state.
+    with st.container(border=True):
+        st.markdown("**Sequence summary**")
+
+        # The FASTA description includes the ID as its first token; trim
+        # it so the ID isn't shown twice.
+        description = meta["description"]
+        if description.startswith(meta["id"]):
+            description = description[len(meta["id"]):].strip()
+
+        for label, value in (
+            ("ID", meta["id"]),
+            ("Description", description or "—"),
+            ("Length", f"{meta['length']} bp"),
+        ):
+            label_col, value_col = st.columns([1, 4])
+            label_col.markdown(f"**{label}**")
+            value_col.write(value)
+
+    # Computed analyses
+    st.subheader("Analysis")
     gc = st.session_state["analyses"]["GC content"]
     st.success(f"GC Content: {gc}%")
 
