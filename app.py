@@ -65,34 +65,43 @@ st.markdown(
     "assist life science researchers."
 )
 
-st.divider()
+# --- Input stage ------------------------------------------------------
+# The input lives in an expander beneath the "Sequence Input" heading.
+# Before a sequence is loaded the expander defaults open; once a sequence
+# is loaded it defaults closed and recedes so the analysis/interpretation
+# phase takes focus. The user can still open or close it manually.
+st.subheader("Sequence Input")
 
-# Two input methods presented side by side
-col1, col2 = st.columns(2)
+sequence_loaded = "analyses" in st.session_state
 
-# Left column — local FASTA file upload
-with col1:
-    st.subheader("Upload a FASTA File")
-    uploaded_file = st.file_uploader(
-        "Choose a FASTA file",
-        type=["fasta", "fa", "txt"]
-    )
+input_label = (
+    "Load a different sequence" if sequence_loaded
+    else "Provide a sequence"
+)
 
-# Right column — remote NCBI sequence fetch
-with col2:
-    st.subheader("Fetch from NCBI")
-    accession_number = st.text_input(
-        "Enter an accession number",
-        placeholder="e.g. NM_000546"
-    )
-    fetch_button = st.button("Fetch Sequence")
+with st.expander(input_label, expanded=not sequence_loaded):
+    upload_col, fetch_col = st.columns(2)
 
-st.divider()
+    with upload_col:
+        st.markdown("**Upload a FASTA file**")
+        uploaded_file = st.file_uploader(
+            "Choose a FASTA file",
+            type=["fasta", "fa", "txt"],
+            label_visibility="collapsed",
+        )
+
+    with fetch_col:
+        st.markdown("**Fetch from NCBI**")
+        accession_number = st.text_input(
+            "Enter an accession number",
+            placeholder="e.g. NM_000546",
+            label_visibility="collapsed",
+        )
+        fetch_button = st.button("Fetch Sequence")
 
 # --- Input handling ---------------------------------------------------
 # When a sequence is loaded, store its metadata and computed analyses in
-# session state (via load_sequence) so they survive the re-runs triggered
-# by later button clicks.
+# session state (via load_sequence) so they survive later re-runs.
 
 if uploaded_file is not None:
     records = parse_fasta_file(uploaded_file)
@@ -156,8 +165,8 @@ if "analyses" in st.session_state:
         st.subheader("AI Interpretation")
         st.caption("Ask Phi-4 to interpret the result (optional)")
 
-        # Optional question from the researcher. Label is collapsed so the
-        # input aligns with the Analysis panel; guidance sits in the caption.
+        # Optional question. Label collapsed so the input aligns with the
+        # Analysis panel; guidance sits in the caption above.
         user_question = st.text_input(
             "Question for Phi-4",
             placeholder="e.g. What might this GC content suggest?",
