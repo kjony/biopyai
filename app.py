@@ -28,26 +28,14 @@ LLM_ERROR_MESSAGES = {
 
 
 def load_sequence(record):
-    """Populate session state from a parsed SeqRecord.
+    """Store a parsed SeqRecord in session state.
 
-    Stores two collections, deliberately shaped so that future metadata
-    fields and additional analyses extend them rather than restructure
-    them:
-
-      - sequence_meta: descriptive identity of the loaded sequence
-      - analyses:      a label -> value map of computed results
-
-    Only GC content is computed today, but the collection shape means a
-    second or third analysis is an added entry, not a rewrite.
+    Loading is decoupled from analysis: we keep the record itself so the
+    selected analyses can be computed on demand from the menu, and the
+    summary card derives its identity fields from the same record. The
+    record is the single source of truth for "a sequence is loaded".
     """
-    st.session_state["sequence_meta"] = {
-        "id": record.id,
-        "description": record.description,
-        "length": len(record.seq),
-    }
-    st.session_state["analyses"] = {
-        label: fn(record) for label, fn in ANALYSES.items()
-    }
+    st.session_state["record"] = record
 
 
 # Page configuration — must be the first Streamlit command
@@ -68,7 +56,7 @@ st.markdown(
 # Whether a sequence is loaded as this run begins. Computed here so the
 # reset control and the input/results sections below all read a single,
 # consistent value.
-sequence_loaded = "analyses" in st.session_state
+sequence_loaded = "record" in st.session_state
 
 # --- Input stage ------------------------------------------------------
 # The "Sequence Input" heading carries a Reset button on its right, shown
@@ -83,11 +71,10 @@ with title_col:
 
 with reset_col:
     if sequence_loaded and st.button("Reset"):
-        for key in ("analyses", "sequence_meta"):
-            st.session_state.pop(key, None)
-        # Bump the input generation so the uploader/accession box
-        # re-instantiate empty (session-state alone can't clear a
-        # lingering upload).
+        st.session_state.pop("record", None)
+        # Bump the input generation so the uploader, accession box, and
+        # analysis menu re-instantiate at their defaults (session-state
+        # alone can't clear a lingering upload).
         st.session_state["input_gen"] = (
             st.session_state.get("input_gen", 0) + 1
         )
@@ -98,8 +85,8 @@ input_label = (
     else "Provide a sequence"
 )
 
-# Generation counter — changing it re-instantiates the input widgets as
-# empty, which is how Reset clears a lingering upload.
+# Generation counter — changing it re-instantiates the input widgets and
+# the analysis menu at their defaults, which is how Reset clears them.
 input_gen = st.session_state.get("input_gen", 0)
 
 with st.expander(input_label, expanded=not sequence_loaded):
@@ -125,8 +112,8 @@ with st.expander(input_label, expanded=not sequence_loaded):
         fetch_button = st.button("Fetch Sequence")
 
 # --- Input handling ---------------------------------------------------
-# When a sequence is loaded, store its metadata and computed analyses in
-# session state (via load_sequence) so they survive later re-runs.
+# When a sequence is loaded, store the record in session state (via
+# load_sequence) so it survives later re-runs.
 
 # Normalize the typed accession once, so stray whitespace neither passes
 # the fetch guard nor gets sent to NCBI.
@@ -154,57 +141,71 @@ elif fetch_button and accession:
 
 # --- Results and interpretation ---------------------------------------
 
-if "analyses" in st.session_state:
-    meta = st.session_state["sequence_meta"]
+if "record" in st.session_state:
+    record = st.session_state["record"]
 
-    # Sequence summary card — renders the identity metadata stored on
-    # load. Purely presentational: no new extraction logic, it reads
-    # what load_sequence() already placed in session state.
+    # Sequence summary card — derives the identity fields straight from
+    # the stored record. Purely presentational.
     with st.container(border=True):
         st.markdown("**Sequence summary**")
 
         # The FASTA description includes the ID as its first token; trim
         # it so the ID isn't shown twice.
-        description = meta["description"]
-        if description.startswith(meta["id"]):
-            description = description[len(meta["id"]):].strip()
+        description = record.description
+        if description.startswith(record.id):
+            description = description[len(record.id):].strip()
 
         for label, value in (
-            ("ID", meta["id"]),
+            ("ID", record.id),
             ("Description", description or "—"),
-            ("Length", f"{meta['length']} bp"),
+            ("Length", f"{len(record.seq)} bp"),
         ):
             label_col, value_col = st.columns([1, 4])
             label_col.markdown(f"**{label}**")
             value_col.write(value)
 
-   # All computed analyses for this sequence.
-    analyses = st.session_state["analyses"]
-
     # Analysis (left) and AI interpretation (right), side by side —
-    # deterministic result paired with language-model reasoning.
+    # deterministic results paired with language-model reasoning.
     analysis_col, interp_col = st.columns(2)
 
     with analysis_col:
         st.subheader("Analysis")
-        st.caption("Deterministic sequence metrics")
-        for label, value in analyses.items():
-            st.success(f"{label}: {value}")
+        st.caption("Select deterministic metrics to compute")
+
+        # Menu of available analyses, drawn from the registry. Keyed to
+        # the input generation so Reset returns it to the default.
+        selected = st.multiselect(
+            "Analyses",
+            options=list(ANALYSES.keys()),
+            label_visibility="collapsed",
+            key=f"analyses_select_{input_gen}",
+        )
+
+        # Compute the selected analyses on demand from the stored record.
+        # Derived fresh each run from (record, selection); not stored.
+        analyses = {label: ANALYSES[label](record) for label in selected}
+
+        if analyses:
+            for label, value in analyses.items():
+                st.success(f"{label}: {value}")
+        else:
+            st.info("Select one or more analyses to run.")
 
     with interp_col:
         st.subheader("AI Interpretation")
-        st.caption("Ask Phi-4 to interpret the result (optional)")
+        st.caption("Ask Phi-4 to interpret the results (optional)")
 
         # Optional question. Label collapsed so the input aligns with the
         # Analysis panel; guidance sits in the caption above.
         user_question = st.text_input(
             "Question for Phi-4",
-            placeholder="e.g. What might this GC content suggest?",
+            placeholder="e.g. What might these metrics suggest?",
             label_visibility="collapsed",
         )
 
-        # On-demand: only run Phi-4 when the user explicitly asks for it
-        if st.button("Interpret with Phi-4"):
+        # Disabled until at least one analysis is selected — no point
+        # asking the model to interpret an empty metric set.
+        if st.button("Interpret with Phi-4", disabled=not analyses):
             with st.spinner("Phi-4 is interpreting the results..."):
                 result = interpret(analyses, user_question or None)
 
