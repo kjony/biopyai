@@ -10,6 +10,7 @@ entry — not a change to the callers that render or interpret results.
 """
 
 from Bio.SeqUtils import gc_fraction, molecular_weight
+from Bio.SeqUtils import MeltingTemp as mt
 
 
 def calculate_gc_content(record):
@@ -84,9 +85,26 @@ def scan_sirna_candidates(record, window=21):
             "Position": start + 1,
             "Sequence": sub,
             "GC content (%)": round(gc_fraction(sub) * 100, 2),
+            "Tm (°C)": _duplex_tm(sub),
         })
 
     return candidates
+
+
+def _duplex_tm(seq):
+    """Melting temperature (°C) of the RNA duplex for a candidate window.
+
+    Uses RNA nearest-neighbor thermodynamics (RNA_NN1, Freier 1986).
+    Biopython normalizes the sequence internally, so passing the
+    DNA-lettered window is fine. Default salt/strand concentrations are
+    used: absolute Tm depends on those conditions, but the relative
+    ordering across candidates — which is what ranking needs — is robust.
+    Returns None if the window can't be scored (e.g. ambiguous bases).
+    """
+    try:
+        return round(mt.Tm_NN(seq, nn_table=mt.RNA_NN1), 1)
+    except Exception:
+        return None
 
 
 # Registry of available analyses: display label -> function. The label
