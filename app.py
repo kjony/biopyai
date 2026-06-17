@@ -48,6 +48,54 @@ st.set_page_config(
     layout="wide"
 )
 
+
+# Per-metric method notes, surfaced as tooltips. They describe what each
+# value measures and how it is computed — deliberately not its biological
+# meaning, which is the interpretation layer's job. Inline here for now;
+# if they multiply or need to travel with the metrics, they fold into the
+# ANALYSES registry (the per-metric metadata seam).
+METRIC_HELP = {
+    "GC content (%)": (
+        "Percentage of G and C bases across the full sequence, computed "
+        "from the base counts."
+    ),
+    "Molecular weight (g/mol)": (
+        "Molecular weight assuming a single-stranded DNA molecule "
+        "(Biopython's molecular_weight, seq_type='DNA')."
+    ),
+}
+
+# Column tooltips for the candidate table. Position and Sequence are
+# identity fields; GC and Tm are per-window metrics (the GC note here is
+# window-scoped, distinct from the whole-sequence note above).
+CANDIDATE_COLUMN_CONFIG = {
+    "Position": st.column_config.NumberColumn(
+        "Position",
+        help="1-based start position of the window on the target.",
+    ),
+    "Sequence": st.column_config.TextColumn(
+        "Sequence",
+        help="The scanned target-strand window, in DNA letters.",
+    ),
+    "GC content (%)": st.column_config.NumberColumn(
+        "GC content (%)",
+        help=(
+            "Percentage of G and C bases in the window, computed from "
+            "the base counts."
+        ),
+    ),
+    "Tm (°C)": st.column_config.NumberColumn(
+        "Tm (°C)",
+        help=(
+            "Duplex melting temperature from RNA nearest-neighbor "
+            "thermodynamics (RNA_NN1, Freier 1986). Comparative across "
+            "candidates; the absolute value depends on salt and strand "
+            "conditions."
+        ),
+    ),
+}
+
+
 # Application header
 st.title("🧬 BioPyAI")
 st.markdown(
@@ -191,16 +239,15 @@ if "record" in st.session_state:
             "Analyses",
             options=list(ANALYSES.keys()),
             label_visibility="collapsed",
+            help="Metrics computed on the full loaded sequence.",
             key=f"analyses_select_{input_gen}",
         )
 
-        # Compute the selected analyses on demand from the stored record.
-        # Derived fresh each run from (record, selection); not stored.
         analyses = {label: ANALYSES[label](record) for label in selected}
 
         if analyses:
             for label, value in analyses.items():
-                st.success(f"{label}: {value}")
+                st.metric(label, value, help=METRIC_HELP.get(label))
         else:
             st.info("Select one or more analyses to run.")
 
@@ -219,9 +266,13 @@ if "record" in st.session_state:
             max_value=30,
             value=21,
             step=1,
+            help=(
+                "Length of each candidate window in nucleotides. 21 nt "
+                "is a common full-length siRNA (~19 bp duplex + 2 nt "
+                "overhangs)."
+            ),
             key=f"sirna_window_{input_gen}",
         )
-
     with scan_col:
         scan_clicked = st.button("Scan for candidates")
 
@@ -245,6 +296,7 @@ if "record" in st.session_state:
                 candidates,
                 width='stretch',
                 hide_index=True,
+                column_config=CANDIDATE_COLUMN_CONFIG,
             )
         else:
             st.info(
