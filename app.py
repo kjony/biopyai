@@ -4,7 +4,7 @@
 import streamlit as st
 
 from core.input import parse_fasta_file, fetch_from_ncbi
-from core.analysis import ANALYSES
+from core.analysis import ANALYSES, scan_sirna_candidates
 from core.llm import interpret
 
 
@@ -36,6 +36,9 @@ def load_sequence(record):
     record is the single source of truth for "a sequence is loaded".
     """
     st.session_state["record"] = record
+    # Drop any candidate scan from a previously loaded sequence so its
+    # stale results don't show against the new one.
+    st.session_state.pop("sirna_candidates", None)
 
 
 # Page configuration — must be the first Streamlit command
@@ -71,10 +74,11 @@ with title_col:
 
 with reset_col:
     if sequence_loaded and st.button("Reset"):
-        st.session_state.pop("record", None)
-        # Bump the input generation so the uploader, accession box, and
-        # analysis menu re-instantiate at their defaults (session-state
-        # alone can't clear a lingering upload).
+        for key in ("record", "sirna_candidates"):
+            st.session_state.pop(key, None)
+        # Bump the input generation so the uploader, accession box,
+        # analysis menu, and scan controls re-instantiate at their
+        # defaults (session-state alone can't clear a lingering upload).
         st.session_state["input_gen"] = (
             st.session_state.get("input_gen", 0) + 1
         )
@@ -85,8 +89,9 @@ input_label = (
     else "Provide a sequence"
 )
 
-# Generation counter — changing it re-instantiates the input widgets and
-# the analysis menu at their defaults, which is how Reset clears them.
+# Generation counter — changing it re-instantiates the input widgets, the
+# analysis menu, and the scan controls at their defaults, which is how
+# Reset clears them.
 input_gen = st.session_state.get("input_gen", 0)
 
 with st.expander(input_label, expanded=not sequence_loaded):
@@ -140,6 +145,9 @@ elif fetch_button and accession:
         load_sequence(records[0])
 
 # --- Results and interpretation ---------------------------------------
+# Vertical flow: a full-width summary card, then Analysis (whole-sequence
+# metrics held to a narrow column, site-specific scan full-width), then a
+# full-width AI Interpretation section beneath.
 
 if "record" in st.session_state:
     record = st.session_state["record"]
@@ -164,16 +172,21 @@ if "record" in st.session_state:
             label_col.markdown(f"**{label}**")
             value_col.write(value)
 
-    # Analysis (left) and AI interpretation (right), side by side —
-    # deterministic results paired with language-model reasoning.
-    analysis_col, interp_col = st.columns(2)
+    # ===== Analysis =====================================================
+    st.subheader("Analysis")
 
-    with analysis_col:
-        st.subheader("Analysis")
-        st.caption("Select deterministic metrics to compute")
+    # --- Whole-sequence metrics: scalar properties of the full sequence.
+    # Held to a narrow column so the result boxes don't stretch.
+    st.markdown(
+        "**Whole-sequence metrics** "
+        ":gray[(computed on the full sequence)]"
+    )
 
-        # Menu of available analyses, drawn from the registry. Keyed to
-        # the input generation so Reset returns it to the default.
+    ws_col, _ = st.columns([2, 3])
+
+    # Menu of available analyses, drawn from the registry. Keyed to
+    # the input generation so Reset returns it to the default.
+    with ws_col:
         selected = st.multiselect(
             "Analyses",
             options=list(ANALYSES.keys()),
@@ -191,31 +204,79 @@ if "record" in st.session_state:
         else:
             st.info("Select one or more analyses to run.")
 
-    with interp_col:
-        st.subheader("AI Interpretation")
-        st.caption("Ask Phi-4 to interpret the results (optional)")
+    # --- Per-candidate metrics: sliding-window scan, full-width table.
+    st.markdown(
+        "**Per-candidate metrics** "
+        ":gray[(sliding-window scan along the target)]"
+    )
 
-        # Optional question. Label collapsed so the input aligns with the
-        # Analysis panel; guidance sits in the caption above.
-        user_question = st.text_input(
-            "Question for Phi-4",
-            placeholder="e.g. What might these metrics suggest?",
-            label_visibility="collapsed",
+    win_col, scan_col = st.columns([1, 2], vertical_alignment="bottom")
+
+    with win_col:
+        window = st.number_input(
+            "Window length (nt)",
+            min_value=15,
+            max_value=30,
+            value=21,
+            step=1,
+            key=f"sirna_window_{input_gen}",
         )
 
-        # Disabled until at least one analysis is selected — no point
-        # asking the model to interpret an empty metric set.
-        if st.button("Interpret with Phi-4", disabled=not analyses):
-            with st.spinner("Phi-4 is interpreting the results..."):
-                result = interpret(analyses, user_question or None)
+    with scan_col:
+        scan_clicked = st.button("Scan for candidates")
 
-            if result.success:
-                st.markdown(result.content)
-            else:
-                message = LLM_ERROR_MESSAGES.get(
-                    result.error, "An unexpected error occurred."
-                )
-                st.error(message)
+    # Button-triggered (heavier than the instant whole-sequence metrics),
+    # so results are cached to survive later reruns. Cleared on Reset and
+    # when a different sequence is loaded.
+    if scan_clicked:
+        with st.spinner("Scanning windows..."):
+            st.session_state["sirna_candidates"] = scan_sirna_candidates(
+                record, window
+            )
+
+    if "sirna_candidates" in st.session_state:
+        candidates = st.session_state["sirna_candidates"]
+        if candidates:
+            st.caption(
+                f"{len(candidates)} candidates — click a column "
+                "header to sort."
+            )
+            st.dataframe(
+                candidates,
+                width='stretch',
+                hide_index=True,
+            )
+        else:
+            st.info(
+                "The sequence is shorter than the window length — "
+                "no candidates."
+            )
+
+    # ===== AI Interpretation ===========================================
+    # Full-width so the model's prose reads comfortably. For now it
+    # interprets the whole-sequence metrics; interpreting a selected
+    # candidate is a later pass.
+    st.subheader("AI Interpretation")
+
+    # Optional question. Label collapsed; guidance sits in the caption.
+    user_question = st.text_input(
+        "Question for Phi-4",
+        placeholder="e.g. What might these metrics suggest?",
+        label_visibility="collapsed",
+    )
+
+    # Disabled until at least one whole-sequence metric is selected.
+    if st.button("Interpret with Phi-4", disabled=not analyses):
+        with st.spinner("Phi-4 is interpreting the results..."):
+            result = interpret(analyses, user_question or None)
+
+        if result.success:
+            st.markdown(result.content)
+        else:
+            message = LLM_ERROR_MESSAGES.get(
+                result.error, "An unexpected error occurred."
+            )
+            st.error(message)
 
 else:
     st.info("Upload a FASTA file or fetch a sequence to see results here.")

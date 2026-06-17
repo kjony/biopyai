@@ -55,6 +55,40 @@ def calculate_molecular_weight(record):
         return None
 
 
+def scan_sirna_candidates(record, window=21):
+    """Slide a window along the sequence, one candidate per position.
+
+    Returns a list of flat dicts — one per window — each carrying the
+    window's position and target-strand sequence plus its computed
+    metrics. "Position" and "Sequence" are identity fields; every other
+    key is a metric, so a selected candidate's metrics map directly onto
+    the interpretation layer later.
+
+    Only GC content is computed for now; the duplex-thermodynamic metrics
+    (Tm, end-asymmetry) arrive in the next pass.
+
+    Args:
+        record: A Biopython SeqRecord object
+        window: candidate length in nucleotides (default 21)
+
+    Returns:
+        A list of candidate dicts (empty if the sequence is shorter than
+        the window).
+    """
+    seq = str(record.seq).upper()
+    candidates = []
+
+    for start in range(len(seq) - window + 1):
+        sub = seq[start:start + window]
+        candidates.append({
+            "Position": start + 1,
+            "Sequence": sub,
+            "GC content (%)": round(gc_fraction(sub) * 100, 2),
+        })
+
+    return candidates
+
+
 # Registry of available analyses: display label -> function. The label
 # carries its unit so the rendering and interpretation layers stay generic
 # (every entry is formatted the same way). Adding an analysis is a new
