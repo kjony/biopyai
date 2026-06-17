@@ -73,28 +73,36 @@ def _preflight():
     return LLMResult(success=True)
 
 
-def _build_prompt(gc_content, user_question=None):
+def _build_prompt(analyses, user_question=None):
     """
-    Construct the user-role prompt from verified metadata.
+    Construct the user-role prompt from verified metrics.
 
-    GC content is stated as an established fact. If the researcher asked a
-    question, it is appended; otherwise we request a brief interpretation.
-    Kept separate so the future streaming version can reuse it unchanged.
+    The computed metrics are listed as established facts. If the
+    researcher asked a question, it is appended; otherwise we request a
+    brief interpretation. Kept separate so the future streaming version
+    can reuse it unchanged.
     """
-    facts = f"The sequence has a GC content of {gc_content}%."
+    lines = "\n".join(
+        f"- {label}: {value}" for label, value in analyses.items()
+    )
+    facts = f"The sequence has the following computed metrics:\n{lines}"
 
     if user_question:
         return f"{facts}\n\nThe researcher asks: {user_question}"
 
-    return f"{facts}\n\nProvide a brief biological interpretation of this result."
+    return (
+        f"{facts}\n\nProvide a brief biological interpretation of these "
+        "results."
+    )
 
 
-def interpret(gc_content, user_question=None):
+def interpret(analyses, user_question=None):
     """
-    Produce a biological interpretation of verified metadata via Phi-4.
+    Produce a biological interpretation of verified metrics via Phi-4.
 
     Args:
-        gc_content: GC content percentage computed by the analysis layer
+        analyses: a label -> value map of metrics computed by the
+                  analysis layer (treated as authoritative facts)
         user_question: optional question from the researcher
 
     Returns:
@@ -106,7 +114,7 @@ def interpret(gc_content, user_question=None):
     if not check.success:
         return check
 
-    prompt = _build_prompt(gc_content, user_question)
+    prompt = _build_prompt(analyses, user_question)
 
     try:
         response = ollama.chat(
@@ -118,8 +126,13 @@ def interpret(gc_content, user_question=None):
         )
         # Attribute access is the current idiom in the 0.6.x client;
         # dict-style response["message"]["content"] also works.
+        # ollama types content as str | None — a message can legitimately
+        # carry no text (e.g. a tool-call-only reply). Guard it: an empty
+        # or missing generation is surfaced as a failed request, not a
+        # blank "success". The guard also narrows content to str, which is
+        # what satisfies the type checker.
         content = response.message.content
-        if content is None:
+        if not content:
             return LLMResult(success=False, error="request_failed")
         return LLMResult(success=True, content=content)
 

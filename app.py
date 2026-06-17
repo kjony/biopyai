@@ -4,7 +4,7 @@
 import streamlit as st
 
 from core.input import parse_fasta_file, fetch_from_ncbi
-from core.analysis import calculate_gc_content
+from core.analysis import ANALYSES
 from core.llm import interpret
 
 
@@ -46,7 +46,7 @@ def load_sequence(record):
         "length": len(record.seq),
     }
     st.session_state["analyses"] = {
-        "GC content": calculate_gc_content(record),
+        label: fn(record) for label, fn in ANALYSES.items()
     }
 
 
@@ -178,8 +178,8 @@ if "analyses" in st.session_state:
             label_col.markdown(f"**{label}**")
             value_col.write(value)
 
-    # Fetch the GC value once; both panels below use it.
-    gc = st.session_state["analyses"]["GC content"]
+   # All computed analyses for this sequence.
+    analyses = st.session_state["analyses"]
 
     # Analysis (left) and AI interpretation (right), side by side —
     # deterministic result paired with language-model reasoning.
@@ -188,7 +188,8 @@ if "analyses" in st.session_state:
     with analysis_col:
         st.subheader("Analysis")
         st.caption("Deterministic sequence metrics")
-        st.success(f"GC Content: {gc}%")
+        for label, value in analyses.items():
+            st.success(f"{label}: {value}")
 
     with interp_col:
         st.subheader("AI Interpretation")
@@ -204,8 +205,8 @@ if "analyses" in st.session_state:
 
         # On-demand: only run Phi-4 when the user explicitly asks for it
         if st.button("Interpret with Phi-4"):
-            with st.spinner("Phi-4 is interpreting the result..."):
-                result = interpret(gc, user_question or None)
+            with st.spinner("Phi-4 is interpreting the results..."):
+                result = interpret(analyses, user_question or None)
 
             if result.success:
                 st.markdown(result.content)
