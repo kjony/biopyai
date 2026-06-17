@@ -93,6 +93,15 @@ CANDIDATE_COLUMN_CONFIG = {
             "conditions."
         ),
     ),
+    "5'-end asymmetry (ΔTm, °C)": st.column_config.NumberColumn(
+        "5'-end asymmetry (ΔTm, °C)",
+        help=(
+            "Difference in RNA nearest-neighbor melting temperature "
+            "between the duplex's two terminal segments (5' end minus "
+            "3' end, RNA_NN1). A thermodynamic measure of end-asymmetry, "
+            "comparative across candidates."
+        ),
+    ),
 }
 
 

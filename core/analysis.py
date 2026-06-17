@@ -12,6 +12,15 @@ entry — not a change to the callers that render or interpret results.
 from Bio.SeqUtils import gc_fraction, molecular_weight
 from Bio.SeqUtils import MeltingTemp as mt
 
+# RNA nearest-neighbor table used for all duplex-stability metrics
+# (Tm and end-asymmetry). Centralized so swapping it — e.g. to
+# mt.RNA_NN3 (Chen 2012) — is a one-line change. RNA_NN1 is Freier 1986.
+RNA_NN_TABLE = mt.RNA_NN1
+
+# Terminal base pairs compared at each duplex end when scoring 5'-end
+# asymmetry. Adjustable; ~4 is common siRNA-design practice.
+TERMINAL_BP = 4
+
 
 def calculate_gc_content(record):
     """
@@ -86,6 +95,7 @@ def scan_sirna_candidates(record, window=21):
             "Sequence": sub,
             "GC content (%)": round(gc_fraction(sub) * 100, 2),
             "Tm (°C)": _duplex_tm(sub),
+            "5'-end asymmetry (ΔTm, °C)": _end_asymmetry(sub),
         })
 
     return candidates
@@ -102,9 +112,40 @@ def _duplex_tm(seq):
     Returns None if the window can't be scored (e.g. ambiguous bases).
     """
     try:
-        return round(mt.Tm_NN(seq, nn_table=mt.RNA_NN1), 1)
+        # was: nn_table=mt.RNA_NN1
+        return round(mt.Tm_NN(seq, nn_table=RNA_NN_TABLE), 1)
     except Exception:
         return None
+    
+
+def _end_asymmetry(seq):
+    """5'-end thermodynamic asymmetry of the candidate's siRNA duplex.
+
+    Strand selection (Khvorova 2003, Schwarz 2003): the strand whose 5'
+    end is the less stable is preferentially loaded into RISC as the
+    guide. The guide is the reverse complement of this target window, so
+    its 5' end pairs with the window's 3' end. We compare the stability
+    of the two duplex ends over the terminal TERMINAL_BP base pairs,
+    using the same RNA nearest-neighbor melting temperature as the Tm
+    column:
+
+        asymmetry = Tm(5' terminal segment) - Tm(3' terminal segment)
+
+    A positive value means the window's 5' end (passenger 5') is more
+    stable than its 3' end (guide 5') -- the arrangement that favours
+    loading the intended guide. Expressed as a Tm difference (deg C),
+    monotonic with the free-energy asymmetry; used comparatively across
+    candidates, not as an absolute quantity. None if a segment can't be
+    scored.
+    """
+    if len(seq) < 2 * TERMINAL_BP:
+        return None
+    try:
+        tm_5 = mt.Tm_NN(seq[:TERMINAL_BP], nn_table=RNA_NN_TABLE)
+        tm_3 = mt.Tm_NN(seq[-TERMINAL_BP:], nn_table=RNA_NN_TABLE)
+        return round(tm_5 - tm_3, 1)
+    except Exception:
+        return None    
 
 
 # Registry of available analyses: display label -> function. The label
