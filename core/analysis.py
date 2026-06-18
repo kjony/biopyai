@@ -90,14 +90,15 @@ def scan_sirna_candidates(record, window=21):
 
     for start in range(len(seq) - window + 1):
         sub = seq[start:start + window]
-        candidates.append({
+        candidate = {
             "Position": start + 1,
             "Sequence": sub,
             "GC content (%)": round(gc_fraction(sub) * 100, 2),
             "Tm (°C)": _duplex_tm(sub),
             "5'-end asymmetry (ΔTm, °C)": _end_asymmetry(sub),
-        })
-
+        }
+        candidate.update(_sequence_rules(sub))
+        candidates.append(candidate)
     return candidates
 
 
@@ -146,6 +147,40 @@ def _end_asymmetry(seq):
         return round(tm_5 - tm_3, 1)
     except Exception:
         return None    
+
+def _has_run(seq, n):
+    """True if any base repeats n or more times consecutively."""
+    run = 1
+    for a, b in zip(seq, seq[1:]):
+        run = run + 1 if a == b else 1
+        if run >= n:
+            return True
+    return False
+
+
+def _sequence_rules(seq):
+    """Empirical siRNA design-rule flags for a target (sense) window.
+
+    Each value is a deterministic yes/no fact drawn from the rational-
+    design rule sets (Ui-Tei 2004, Reynolds 2004). They are heuristics,
+    not predictions, and are presented as individual flags rather than a
+    summed score, so the researcher sees which criteria a candidate meets
+    and can sort or filter on the ones they trust. Positions are counted
+    from the 5' end of the sense window; the rules were derived for
+    ~19-21mers. A/U in the RNA duplex corresponds to A/T in the DNA-
+    lettered window.
+    """
+    seq = seq.upper()
+    gc = gc_fraction(seq) * 100
+    au = set("AT")
+    return {
+        "GC 30-52%": 30 <= gc <= 52,
+        "Guide 5' A/U": seq[-1] in au,
+        "Sense 5' G/C": seq[0] in {"G", "C"},
+        "Guide 5' AU-rich": sum(b in au for b in seq[-7:]) >= 4,
+        "U at 10": len(seq) >= 10 and seq[9] == "T",
+        "No 4+ run": not _has_run(seq, 4),
+    }
 
 
 # Registry of available analyses: display label -> function. The label

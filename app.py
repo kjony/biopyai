@@ -102,6 +102,48 @@ CANDIDATE_COLUMN_CONFIG = {
             "comparative across candidates."
         ),
     ),
+    "GC 30-52%": st.column_config.CheckboxColumn(
+        "GC 30-52%",
+        help=(
+            "GC content is within the 30-52% window favoured by Reynolds "
+            "(2004) — a duplex-stability sweet spot."
+        ),
+    ),
+    "Guide 5' A/U": st.column_config.CheckboxColumn(
+        "Guide 5' A/U",
+        help=(
+            "The guide's 5' base (complement of the window's 3' base) is "
+            "A or U — a weak guide 5' end (Ui-Tei 2004)."
+        ),
+    ),
+    "Sense 5' G/C": st.column_config.CheckboxColumn(
+        "Sense 5' G/C",
+        help=(
+            "The window's 5' base is G or C — a strong sense 5' end "
+            "(Ui-Tei 2004)."
+        ),
+    ),
+    "Guide 5' AU-rich": st.column_config.CheckboxColumn(
+        "Guide 5' AU-rich",
+        help=(
+            "At least 4 A/U among the guide's 5' 7 nt (the window's 3' "
+            "7 nt) (Ui-Tei 2004)."
+        ),
+    ),
+    "U at 10": st.column_config.CheckboxColumn(
+        "U at 10",
+        help=(
+            "Sense position 10 is U — the cleavage-site preference "
+            "(Reynolds 2004), opposite the AGO2 scissile site."
+        ),
+    ),
+    "No 4+ run": st.column_config.CheckboxColumn(
+        "No 4+ run",
+        help=(
+            "No run of 4 or more identical bases — guards low-complexity, "
+            "structure-prone sequence (Reynolds 2004)."
+        ),
+    ),
 }
 
 
