@@ -11,6 +11,7 @@ entry — not a change to the callers that render or interpret results.
 
 from Bio.SeqUtils import gc_fraction, molecular_weight
 from Bio.SeqUtils import MeltingTemp as mt
+import pandas as pd
 
 # RNA nearest-neighbor table used for all duplex-stability metrics
 # (Tm and end-asymmetry). Centralized so swapping it — e.g. to
@@ -148,6 +149,7 @@ def _end_asymmetry(seq):
     except Exception:
         return None    
 
+
 def _has_run(seq, n):
     """True if any base repeats n or more times consecutively."""
     run = 1
@@ -181,6 +183,23 @@ def _sequence_rules(seq):
         "U at 10": len(seq) >= 10 and seq[9] == "T",
         "No 4+ run": not _has_run(seq, 4),
     }
+
+
+def shortlist_candidates(candidates, required_rules, sort_key,
+                         ascending, limit):
+    """Narrow scanned candidates to a small, ranked shortlist.
+
+    A deterministic filter-and-sort over the candidate set: keep those
+    passing every rule in required_rules, order by sort_key, and return
+    the top `limit`. This is the exact, reproducible narrowing the engine
+    owns — the model never does it. Candidates missing a sort value
+    (e.g. a Tm that couldn't be scored) sort to the end.
+    """
+    df = pd.DataFrame(candidates)
+    if required_rules:
+        df = df[df[required_rules].all(axis=1)]
+    df = df.sort_values(sort_key, ascending=ascending, na_position="last")
+    return df.head(limit).to_dict("records")
 
 
 # Registry of available analyses: display label -> function. The label

@@ -4,7 +4,7 @@
 import streamlit as st
 
 from core.input import parse_fasta_file, fetch_from_ncbi
-from core.analysis import ANALYSES, scan_sirna_candidates
+from core.analysis import ANALYSES, scan_sirna_candidates, shortlist_candidates
 from core.llm import interpret
 
 
@@ -362,6 +362,64 @@ if "record" in st.session_state:
                 "The sequence is shorter than the window length — "
                 "no candidates."
             )
+
+    # ----- Shortlist (deterministic filter + sort) ---------------------
+    # The engine narrows the full scan to a small ranked set the
+    # researcher can act on — and that the model can later compare. The
+    # exact filtering and ordering lives here, in code, not in the LLM.
+    candidates = st.session_state.get("sirna_candidates")
+    if candidates:
+        with st.expander("Build a shortlist", expanded=False):
+            # Tucked away so the scan and shortlist tables aren't stacked
+            # by default; open it to filter and rank the scan.
+            sample = candidates[0]
+            rule_labels = [
+                k for k, v in sample.items() if isinstance(v, bool)
+            ]
+            sort_labels = [
+                "5'-end asymmetry (ΔTm, °C)", "Tm (°C)",
+                "GC content (%)",
+            ]
+
+            f_col, s_col, o_col, n_col = st.columns([4, 3, 2, 2])
+            with f_col:
+                required_rules = st.multiselect(
+                    "Require rules",
+                    rule_labels,
+                    help="Keep only candidates passing every "
+                         "selected rule.",
+                    key=f"shortlist_rules_{input_gen}",
+                )
+            with s_col:
+                sort_key = st.selectbox(
+                    "Sort by", sort_labels,
+                    key=f"shortlist_sort_{input_gen}",
+                )
+            with o_col:
+                order = st.selectbox(
+                    "Order", ["Descending", "Ascending"],
+                    key=f"shortlist_order_{input_gen}",
+                )
+            with n_col:
+                limit = st.number_input(
+                    "Top N", min_value=1, max_value=25, value=10,
+                    step=1, key=f"shortlist_limit_{input_gen}",
+                )
+
+            shortlist = shortlist_candidates(
+                candidates, required_rules, sort_key,
+                ascending=(order == "Ascending"), limit=limit,
+            )
+
+            if shortlist:
+                st.dataframe(
+                    shortlist,
+                    width='stretch',
+                    hide_index=True,
+                    column_config=CANDIDATE_COLUMN_CONFIG,
+                )
+            else:
+                st.info("No candidates pass every required rule.")
 
     # ===== AI Interpretation ===========================================
     # Full-width grounded interpretation. The subject is either the
