@@ -26,7 +26,6 @@ LLM_ERROR_MESSAGES = {
     ),
 }
 
-
 def load_sequence(record):
     """Store a parsed SeqRecord in session state.
 
@@ -35,9 +34,14 @@ def load_sequence(record):
     summary card derives its identity fields from the same record. The
     record is the single source of truth for "a sequence is loaded".
     """
+    
+    # Re-running while the uploader still holds a file calls this every
+    # rerun. Only act on a genuinely new sequence, so downstream state
+    # (the scanned candidates) survives unrelated reruns.
+    current = st.session_state.get("record")
+    if current is not None and record.seq == current.seq:
+        return
     st.session_state["record"] = record
-    # Drop any candidate scan from a previously loaded sequence so its
-    # stale results don't show against the new one.
     st.session_state.pop("sirna_candidates", None)
 
 
@@ -173,7 +177,7 @@ with title_col:
 
 with reset_col:
     if sequence_loaded and st.button("Reset"):
-        for key in ("record", "sirna_candidates"):
+        for key in ("record", "sirna_candidates", "loaded_file_id"):
             st.session_state.pop(key, None)
         # Bump the input generation so the uploader, accession box,
         # analysis menu, and scan controls re-instantiate at their
@@ -192,6 +196,7 @@ input_label = (
 # analysis menu, and the scan controls at their defaults, which is how
 # Reset clears them.
 input_gen = st.session_state.get("input_gen", 0)
+
 
 with st.expander(input_label, expanded=not sequence_loaded):
     upload_col, fetch_col = st.columns(2)
@@ -224,14 +229,18 @@ with st.expander(input_label, expanded=not sequence_loaded):
 accession = accession_number.strip()
 
 if uploaded_file is not None:
-    records = parse_fasta_file(uploaded_file)
-    if records is None:
-        st.error(
-            "Could not parse the uploaded file. "
-            "Please upload a valid FASTA file."
-        )
-    else:
-        load_sequence(records[0])
+    # The uploader keeps its file across reruns; parse only when it's a
+    # new file, not on every rerun.
+    if uploaded_file.file_id != st.session_state.get("loaded_file_id"):
+        records = parse_fasta_file(uploaded_file)
+        if records is None:
+            st.error(
+                "Could not parse the uploaded file. "
+                "Please upload a valid FASTA file."
+            )
+        else:
+            st.session_state["loaded_file_id"] = uploaded_file.file_id
+            load_sequence(records[0])
 
 elif fetch_button and accession:
     records = fetch_from_ncbi(accession)
@@ -326,7 +335,6 @@ if "record" in st.session_state:
         )
     with scan_col:
         scan_clicked = st.button("Scan for candidates")
-
     # Button-triggered (heavier than the instant whole-sequence metrics),
     # so results are cached to survive later reruns. Cleared on Reset and
     # when a different sequence is loaded.
@@ -356,22 +364,54 @@ if "record" in st.session_state:
             )
 
     # ===== AI Interpretation ===========================================
-    # Full-width so the model's prose reads comfortably. For now it
-    # interprets the whole-sequence metrics; interpreting a selected
-    # candidate is a later pass.
+    # Full-width grounded interpretation. The subject is either the
+    # whole-sequence metrics or a single scanned candidate — both are
+    # flat fact collections, so interpret() consumes either unchanged.
     st.subheader("AI Interpretation")
 
-    # Optional question. Label collapsed; guidance sits in the caption.
+    candidates = st.session_state.get("sirna_candidates")
+
+    subject = st.radio(
+        "Interpret",
+        ["Whole-sequence metrics", "A single candidate"],
+        horizontal=True,
+        label_visibility="collapsed",
+        key=f"interp_subject_{input_gen}",
+    )
+
+    if subject == "A single candidate":
+        if candidates:
+            positions = [c["Position"] for c in candidates]
+            pos = st.number_input(
+                "Candidate position",
+                min_value=min(positions),
+                max_value=max(positions),
+                value=min(positions),
+                step=1,
+                key=f"interp_position_{input_gen}",
+            )
+            facts = next(
+                (c for c in candidates if c["Position"] == pos), None
+            )
+            if facts:
+                st.caption(f"Position {pos}: {facts['Sequence']}")
+        else:
+            st.info("Run the candidate scan first to interpret one.")
+            facts = None
+
+    else:
+        facts = analyses
+
+    # Optional question for the model about the chosen subject.
     user_question = st.text_input(
         "Question for Phi-4",
-        placeholder="e.g. What might these metrics suggest?",
+        placeholder="e.g. What might this suggest?",
         label_visibility="collapsed",
     )
 
-    # Disabled until at least one whole-sequence metric is selected.
-    if st.button("Interpret with Phi-4", disabled=not analyses):
+    if st.button("Interpret with Phi-4", disabled=not facts):
         with st.spinner("Phi-4 is interpreting the results..."):
-            result = interpret(analyses, user_question or None)
+            result = interpret(facts, user_question or None)
 
         if result.success:
             st.markdown(result.content)
@@ -380,6 +420,5 @@ if "record" in st.session_state:
                 result.error, "An unexpected error occurred."
             )
             st.error(message)
-
 else:
     st.info("Upload a FASTA file or fetch a sequence to see results here.")

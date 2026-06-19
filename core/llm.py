@@ -108,12 +108,14 @@ def interpret(analyses, user_question=None):
     Returns:
         LLMResult — success with content, or failure with an error code
     """
+    if not analyses:
+        return LLMResult(success=False, error="request_failed")
+
     # Pre-flight first: fail fast and specifically if the service or model
     # isn't ready, before spending time on a generation call.
     check = _preflight()
     if not check.success:
         return check
-
     prompt = _build_prompt(analyses, user_question)
 
     try:
