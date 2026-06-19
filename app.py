@@ -5,7 +5,7 @@ import streamlit as st
 
 from core.input import parse_fasta_file, fetch_from_ncbi
 from core.analysis import ANALYSES, scan_sirna_candidates, shortlist_candidates
-from core.llm import interpret
+from core.llm import interpret, interpret_shortlist
 
 
 # Maps the intelligence layer's error codes to user-facing messages.
@@ -367,6 +367,7 @@ if "record" in st.session_state:
     # The engine narrows the full scan to a small ranked set the
     # researcher can act on — and that the model can later compare. The
     # exact filtering and ordering lives here, in code, not in the LLM.
+    shortlist = None
     candidates = st.session_state.get("sirna_candidates")
     if candidates:
         with st.expander("Build a shortlist", expanded=False):
@@ -431,7 +432,7 @@ if "record" in st.session_state:
 
     subject = st.radio(
         "Interpret",
-        ["Whole-sequence metrics", "A single candidate"],
+        ["Whole-sequence metrics", "A single candidate", "The shortlist"],
         horizontal=True,
         label_visibility="collapsed",
         key=f"interp_subject_{input_gen}",
@@ -456,21 +457,28 @@ if "record" in st.session_state:
         else:
             st.info("Run the candidate scan first to interpret one.")
             facts = None
-
+    elif subject == "The shortlist":
+        if shortlist:
+            st.caption(f"{len(shortlist)} candidates in the shortlist.")
+            facts = shortlist
+        else:
+            st.info("Build a shortlist first to interpret it.")
+            facts = None
     else:
         facts = analyses
 
-    # Optional question for the model about the chosen subject.
     user_question = st.text_input(
         "Question for Phi-4",
         placeholder="e.g. What might this suggest?",
         label_visibility="collapsed",
     )
 
+    interpret_fn = (
+        interpret_shortlist if subject == "The shortlist" else interpret
+    )
     if st.button("Interpret with Phi-4", disabled=not facts):
         with st.spinner("Phi-4 is interpreting the results..."):
-            result = interpret(facts, user_question or None)
-
+            result = interpret_fn(facts, user_question or None)
         if result.success:
             st.markdown(result.content)
         else:
@@ -478,5 +486,6 @@ if "record" in st.session_state:
                 result.error, "An unexpected error occurred."
             )
             st.error(message)
+            
 else:
     st.info("Upload a FASTA file or fetch a sequence to see results here.")

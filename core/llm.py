@@ -96,28 +96,46 @@ def _build_prompt(analyses, user_question=None):
     )
 
 
-def interpret(analyses, user_question=None):
+def _build_shortlist_prompt(candidates, user_question=None):
+    """Format a candidate shortlist for comparative interpretation.
+
+    Each candidate becomes a labelled block of its verified metrics, and
+    the model is asked to compare them on those metrics alone. The
+    grounding clause in the system prompt still governs: the values are
+    authoritative and must not be recomputed or invented.
     """
-    Produce a biological interpretation of verified metrics via Phi-4.
+    blocks = []
+    for candidate in candidates:
+        lines = "\n".join(
+            f"  - {label}: {value}"
+            for label, value in candidate.items()
+            if label != "Position"
+        )
+        blocks.append(
+            f"Candidate at position {candidate['Position']}:\n{lines}"
+        )
+    catalogue = "\n\n".join(blocks)
 
-    Args:
-        analyses: a label -> value map of metrics computed by the
-                  analysis layer (treated as authoritative facts)
-        user_question: optional question from the researcher
+    request = user_question or (
+        "Compare these candidates on the metrics shown and identify "
+        "which look most promising, with the reasons and any trade-offs."
+    )
+    return (
+        "Here is a shortlist of candidate siRNAs with their computed "
+        f"metrics:\n\n{catalogue}\n\n{request}"
+    )
 
-    Returns:
-        LLMResult — success with content, or failure with an error code
+
+def _complete(prompt):
+    """Run a built prompt through Phi-4, returning a structured result.
+
+    Shared by interpret() and interpret_shortlist(): preflight, the chat
+    call, and the success/error wrapping live here, so the two entry
+    points differ only in how they build their prompt.
     """
-    if not analyses:
-        return LLMResult(success=False, error="request_failed")
-
-    # Pre-flight first: fail fast and specifically if the service or model
-    # isn't ready, before spending time on a generation call.
-    check = _preflight()
-    if not check.success:
-        return check
-    prompt = _build_prompt(analyses, user_question)
-
+    preflight = _preflight()
+    if not preflight.success:
+        return preflight
     try:
         response = ollama.chat(
             model=MODEL_NAME,
@@ -126,19 +144,22 @@ def interpret(analyses, user_question=None):
                 {"role": "user", "content": prompt},
             ],
         )
-        # Attribute access is the current idiom in the 0.6.x client;
-        # dict-style response["message"]["content"] also works.
-        # ollama types content as str | None — a message can legitimately
-        # carry no text (e.g. a tool-call-only reply). Guard it: an empty
-        # or missing generation is surfaced as a failed request, not a
-        # blank "success". The guard also narrows content to str, which is
-        # what satisfies the type checker.
-        content = response.message.content
-        if not content:
-            return LLMResult(success=False, error="request_failed")
-        return LLMResult(success=True, content=content)
-
+        return LLMResult(
+            success=True,
+            content=response.message.content or "",
+        )
     except Exception:
-        # Service was up at pre-flight but the generation call still failed
-        # (e.g. timeout, model unloaded mid-request).
         return LLMResult(success=False, error="request_failed")
+
+
+def interpret(analyses, user_question=None):
+    if not analyses:
+        return LLMResult(success=False, error="request_failed")
+    return _complete(_build_prompt(analyses, user_question))
+
+
+def interpret_shortlist(candidates, user_question=None):
+    """Compare a shortlist of candidates over their verified metrics."""
+    if not candidates:
+        return LLMResult(success=False, error="request_failed")
+    return _complete(_build_shortlist_prompt(candidates, user_question))
