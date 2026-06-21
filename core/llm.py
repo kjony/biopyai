@@ -73,37 +73,16 @@ def _preflight():
     return LLMResult(success=True)
 
 
-def _build_prompt(analyses, user_question=None):
-    """
-    Construct the user-role prompt from verified metrics.
-
-    The computed metrics are listed as established facts. If the
-    researcher asked a question, it is appended; otherwise we request a
-    brief interpretation. Kept separate so the future streaming version
-    can reuse it unchanged.
-    """
+def _build_prompt(analyses):
+    """Format a single fact set as labelled lines (data only)."""
     lines = "\n".join(
         f"- {label}: {value}" for label, value in analyses.items()
     )
-    facts = f"The sequence has the following computed metrics:\n{lines}"
-
-    if user_question:
-        return f"{facts}\n\nThe researcher asks: {user_question}"
-
-    return (
-        f"{facts}\n\nProvide a brief biological interpretation of these "
-        "results."
-    )
+    return f"Computed metrics:\n{lines}"
 
 
-def _build_shortlist_prompt(candidates, user_question=None):
-    """Format a candidate shortlist for comparative interpretation.
-
-    Each candidate becomes a labelled block of its verified metrics, and
-    the model is asked to compare them on those metrics alone. The
-    grounding clause in the system prompt still governs: the values are
-    authoritative and must not be recomputed or invented.
-    """
+def _build_shortlist_prompt(candidates):
+    """Format a candidate shortlist as labelled blocks (data only)."""
     blocks = []
     for candidate in candidates:
         lines = "\n".join(
@@ -114,24 +93,29 @@ def _build_shortlist_prompt(candidates, user_question=None):
         blocks.append(
             f"Candidate at position {candidate['Position']}:\n{lines}"
         )
-    catalogue = "\n\n".join(blocks)
+    return "Candidate metrics:\n\n" + "\n\n".join(blocks)
 
-    request = user_question or (
-        "Compare these candidates on the metrics shown and identify "
-        "which look most promising, with the reasons and any trade-offs."
+
+def build_opening_message(facts, user_question):
+    """Assemble the opening message: verified facts, then the question.
+
+    The fact builders emit only computed data; the framing and the ask
+    arrive through `user_question`, so the data layer stays domain-neutral
+    and the interpretive lens is supplied at the call site.
+    """
+    body = (
+        _build_shortlist_prompt(facts) if isinstance(facts, list)
+        else _build_prompt(facts)
     )
-    return (
-        "Here is a shortlist of candidate siRNAs with their computed "
-        f"metrics:\n\n{catalogue}\n\n{request}"
-    )
+    return f"{body}\n\n{user_question}"
 
 
-def _complete(prompt):
-    """Run a built prompt through Phi-4, returning a structured result.
+def converse(messages):
+    """Continue a grounded conversation, returning a structured result.
 
-    Shared by interpret() and interpret_shortlist(): preflight, the chat
-    call, and the success/error wrapping live here, so the two entry
-    points differ only in how they build their prompt.
+    `messages` is the running list of user/assistant turns; the opening
+    turn carries the verified facts. The system prompt is prepended here
+    so its grounding and boundary clauses govern every turn.
     """
     preflight = _preflight()
     if not preflight.success:
@@ -141,7 +125,7 @@ def _complete(prompt):
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
-                {"role": "user", "content": prompt},
+                *messages,
             ],
         )
         return LLMResult(
@@ -150,16 +134,3 @@ def _complete(prompt):
         )
     except Exception:
         return LLMResult(success=False, error="request_failed")
-
-
-def interpret(analyses, user_question=None):
-    if not analyses:
-        return LLMResult(success=False, error="request_failed")
-    return _complete(_build_prompt(analyses, user_question))
-
-
-def interpret_shortlist(candidates, user_question=None):
-    """Compare a shortlist of candidates over their verified metrics."""
-    if not candidates:
-        return LLMResult(success=False, error="request_failed")
-    return _complete(_build_shortlist_prompt(candidates, user_question))

@@ -5,7 +5,7 @@ import streamlit as st
 
 from core.input import parse_fasta_file, fetch_from_ncbi
 from core.analysis import ANALYSES, scan_sirna_candidates, shortlist_candidates
-from core.llm import interpret, interpret_shortlist
+from core.llm import  build_opening_message, converse
 
 
 # Maps the intelligence layer's error codes to user-facing messages.
@@ -43,6 +43,7 @@ def load_sequence(record):
         return
     st.session_state["record"] = record
     st.session_state.pop("sirna_candidates", None)
+    st.session_state.pop("conversation", None)
 
 
 # Page configuration — must be the first Streamlit command
@@ -177,7 +178,7 @@ with title_col:
 
 with reset_col:
     if sequence_loaded and st.button("Reset"):
-        for key in ("record", "sirna_candidates", "loaded_file_id"):
+        for key in ("record", "sirna_candidates", "loaded_file_id", "conversation"):
             st.session_state.pop(key, None)
         # Bump the input generation so the uploader, accession box,
         # analysis menu, and scan controls re-instantiate at their
@@ -423,9 +424,9 @@ if "record" in st.session_state:
                 st.info("No candidates pass every required rule.")
 
     # ===== AI Interpretation ===========================================
-    # Full-width grounded interpretation. The subject is either the
-    # whole-sequence metrics or a single scanned candidate — both are
-    # flat fact collections, so interpret() consumes either unchanged.
+    # A grounded, multi-turn conversation. Turn one carries the verified
+    # facts for the chosen subject; follow-ups ride on that context, so
+    # the model interprets rather than invents.
     st.subheader("AI Interpretation")
 
     candidates = st.session_state.get("sirna_candidates")
@@ -467,25 +468,74 @@ if "record" in st.session_state:
     else:
         facts = analyses
 
+
     user_question = st.text_input(
         "Question for Phi-4",
-        placeholder="e.g. What might this suggest?",
+        placeholder="Optional user question (e.g. What might these values suggest?)",
         label_visibility="collapsed",
-    )
+        key=f"interp_question_{input_gen}",
+    )    
 
-    interpret_fn = (
-        interpret_shortlist if subject == "The shortlist" else interpret
-    )
-    if st.button("Interpret with Phi-4", disabled=not facts):
-        with st.spinner("Phi-4 is interpreting the results..."):
-            result = interpret_fn(facts, user_question or None)
-        if result.success:
-            st.markdown(result.content)
-        else:
-            message = LLM_ERROR_MESSAGES.get(
-                result.error, "An unexpected error occurred."
-            )
-            st.error(message)
-            
+    start_col, clear_col = st.columns([3, 1])
+    with start_col:
+        start = st.button(
+            "Interpret with Phi-4",
+            disabled=not facts,
+            use_container_width=True,
+        )
+    with clear_col:
+        clear = st.button(
+            "Clear",
+            disabled=not st.session_state.get("conversation"),
+            use_container_width=True,
+        )
+
+    if clear:
+        st.session_state.pop("conversation", None)
+    
+    if start:
+        default = (
+            "Compare these candidates and identify which look most "
+            "promising, with the reasons and any trade-offs."
+            if subject == "The shortlist"
+            else "Interpret these metrics, noting anything notable."
+        )
+        opening = build_opening_message(facts, user_question or default)
+        st.session_state["conversation"] = [
+            {"role": "user", "content": opening}
+        ]
+    
+
+    # The grounded opening message is scaffolding, so display starts at
+    # the assistant's first reply. Whenever the latest turn is the
+    # user's, produce the assistant's response now.
+    conversation = st.session_state.get("conversation")
+    if conversation:
+        for message in conversation[1:]:
+            with st.chat_message(message["role"]):
+                st.markdown(message["content"])
+
+        if conversation[-1]["role"] == "user":
+            with st.chat_message("assistant"):
+                with st.spinner("Phi-4 is interpreting..."):
+                    reply = converse(conversation)
+                if reply.success:
+                    st.markdown(reply.content)
+                    conversation.append(
+                        {"role": "assistant", "content": reply.content}
+                    )
+                else:
+                    conversation.pop()
+                    if not conversation:
+                        st.session_state.pop("conversation", None)
+                    st.error(
+                        LLM_ERROR_MESSAGES.get(
+                            reply.error, "An unexpected error occurred."
+                        )
+                    )
+
+        if follow_up := st.chat_input("Ask a follow-up"):
+            conversation.append({"role": "user", "content": follow_up})
+            st.rerun()
 else:
     st.info("Upload a FASTA file or fetch a sequence to see results here.")
