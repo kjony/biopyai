@@ -5,7 +5,7 @@ import streamlit as st
 
 from core.input import parse_fasta_file, fetch_from_ncbi
 from core.analysis import ANALYSES, scan_sirna_candidates, shortlist_candidates
-from core.llm import  build_opening_message, converse
+from core.llm import  build_opening_message, stream_converse, preflight
 
 
 # Maps the intelligence layer's error codes to user-facing messages.
@@ -486,7 +486,6 @@ if "record" in st.session_state:
     with clear_col:
         clear = st.button(
             "Clear",
-            disabled=not st.session_state.get("conversation"),
             use_container_width=True,
         )
 
@@ -516,23 +515,27 @@ if "record" in st.session_state:
                 st.markdown(message["content"])
 
         if conversation[-1]["role"] == "user":
-            with st.chat_message("assistant"):
-                with st.spinner("Phi-4 is interpreting..."):
-                    reply = converse(conversation)
-                if reply.success:
-                    st.markdown(reply.content)
-                    conversation.append(
-                        {"role": "assistant", "content": reply.content}
+            check = preflight()
+            if check.success:
+                with st.chat_message("assistant"):
+                    reply = st.write_stream(stream_converse(conversation))
+            else:
+                reply = ""
+
+            if reply:
+                conversation.append(
+                    {"role": "assistant", "content": reply}
+                )
+            else:
+                conversation.pop()
+                if not conversation:
+                    st.session_state.pop("conversation", None)
+                st.error(
+                    LLM_ERROR_MESSAGES.get(
+                        check.error or "request_failed",
+                        "An unexpected error occurred.",
                     )
-                else:
-                    conversation.pop()
-                    if not conversation:
-                        st.session_state.pop("conversation", None)
-                    st.error(
-                        LLM_ERROR_MESSAGES.get(
-                            reply.error, "An unexpected error occurred."
-                        )
-                    )
+                )
 
         if follow_up := st.chat_input("Ask a follow-up"):
             conversation.append({"role": "user", "content": follow_up})

@@ -49,7 +49,7 @@ class LLMResult:
     error: str = ""
 
 
-def _preflight():
+def preflight():
     """
     Cheap pre-flight check before attempting generation.
 
@@ -60,18 +60,12 @@ def _preflight():
     try:
         available = ollama.list()
     except Exception:
-        # Could not reach the Ollama service at all.
         return LLMResult(success=False, error="service_down")
-
-    # ollama-python 0.6.2 returns a list under .models, each entry exposing
-    # a .model attribute holding a name like "phi4:latest". The trailing
-    # filter guards against any entry with a missing name.
     model_names = [m.model for m in available.models if m.model]
     if not any(name.startswith("phi4") for name in model_names):
         return LLMResult(success=False, error="model_missing")
-
     return LLMResult(success=True)
-
+  
 
 def _build_prompt(analyses):
     """Format a single fact set as labelled lines (data only)."""
@@ -110,27 +104,26 @@ def build_opening_message(facts, user_question):
     return f"{body}\n\n{user_question}"
 
 
-def converse(messages):
-    """Continue a grounded conversation, returning a structured result.
+def stream_converse(messages):
+    """Stream a grounded conversation reply, yielding text chunks.
 
-    `messages` is the running list of user/assistant turns; the opening
-    turn carries the verified facts. The system prompt is prepended here
-    so its grounding and boundary clauses govern every turn.
+    Assumes preflight() has already passed. The system prompt is prepended
+    so its grounding and boundary clauses govern every turn. A mid-stream
+    failure ends the stream rather than raising into the UI; preflight()
+    covers the predictable failures up front.
     """
-    preflight = _preflight()
-    if not preflight.success:
-        return preflight
     try:
-        response = ollama.chat(
+        stream = ollama.chat(
             model=MODEL_NAME,
             messages=[
                 {"role": "system", "content": SYSTEM_PROMPT},
                 *messages,
             ],
+            stream=True,
         )
-        return LLMResult(
-            success=True,
-            content=response.message.content or "",
-        )
+        for chunk in stream:
+            text = chunk.message.content
+            if text:
+                yield text
     except Exception:
-        return LLMResult(success=False, error="request_failed")
+        return
