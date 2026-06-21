@@ -160,6 +160,37 @@ st.markdown(
     "assist life science researchers."
 )
 
+
+ABOUT = """\
+**BioPyAI** pairs deterministic sequence analysis with a local language
+model to support scientific research, keeping computed facts and model
+interpretation in separate lanes.
+
+**How it works.** *Biopython* computes the exact, reproducible metrics (e.g - GC
+content, duplex Tm, sequence-rule flags, etc.). *Phi-4*, running locally through 
+*Ollama*, then interprets those verified numbers; it never computes or invents them. 
+You stay in the loop: choose what to analyze and ask follow-ups grounded in the metrics.
+
+**Using it.** Provide a sequence by FASTA upload or NCBI accession, pick
+whole-sequence or per-candidate metrics, scan the target for candidates
+(optionally narrow to a shortlist), then open a grounded interpretation of
+any subject and continue the conversation.
+
+**What to trust, and what to check.** The metrics are computed and
+reproducible. The biology the model wraps around them (e.g - why an
+asymmetry value favours guide loading, what a GC window implies, etc.) 
+is its trained knowledge and can be incomplete or dated. Treat interpretations
+as a knowledgeable second opinion to verify, not a verdict; **this is a research
+and learning aid, not a clinical or therapeutic decision tool**.
+
+**Privacy.** Everything runs on your machine; sequences and conversations
+are never sent to an external service.
+"""
+
+with st.expander("About BioPyAI"):
+    st.markdown(ABOUT)
+
+
 # Whether a sequence is loaded as this run begins. Computed here so the
 # reset control and the input/results sections below all read a single,
 # consistent value.
