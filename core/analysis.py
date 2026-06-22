@@ -9,7 +9,7 @@ to its function, so adding a metric is a new function plus one registry
 entry — not a change to the callers that render or interpret results.
 """
 
-from Bio.SeqUtils import gc_fraction, molecular_weight
+from Bio.SeqUtils import gc_fraction
 from Bio.SeqUtils import MeltingTemp as mt
 import pandas as pd
 
@@ -43,27 +43,17 @@ def calculate_gc_content(record):
         return None
 
 
-def calculate_molecular_weight(record):
+def count_non_standard_bases(record):
+    """Count bases outside the standard A/C/G/T/U set.
+
+    Flags ambiguity codes (N and other IUPAC symbols), gaps, and any
+    stray characters. Soft-masked lowercase a/c/g/t are treated as
+    standard. A non-zero count signals positions where downstream
+    metrics may be unreliable.
     """
-    Calculate the molecular weight of a sequence.
-
-    Treats the sequence as single-stranded DNA (FASTA nucleotide records
-    use DNA letters). A general whole-sequence property, included to
-    exercise the multi-metric path; the siRNA-specific, per-candidate
-    metrics arrive with the windowing slice later.
-
-    Args:
-        record: A Biopython SeqRecord object
-
-    Returns:
-        Molecular weight in g/mol rounded to two decimal places,
-        or None if calculation fails
-    """
-    try:
-        return round(molecular_weight(record.seq, seq_type="DNA"), 2)
-
-    except Exception:
-        return None
+    standard = {"A", "C", "G", "T", "U"}
+    sequence = str(record.seq).upper()
+    return sum(1 for base in sequence if base not in standard)
 
 
 def scan_sirna_candidates(record, window=21):
@@ -208,5 +198,5 @@ def shortlist_candidates(candidates, required_rules, sort_key,
 # function plus one entry here — the seam the menu and siRNA panel build on.
 ANALYSES = {
     "GC content (%)": calculate_gc_content,
-    "Molecular weight (g/mol)": calculate_molecular_weight,
+    "Non-standard bases": count_non_standard_bases,
 }

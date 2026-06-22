@@ -64,9 +64,10 @@ METRIC_HELP = {
         "Percentage of G and C bases across the full sequence, computed "
         "from the base counts."
     ),
-    "Molecular weight (g/mol)": (
-        "Molecular weight assuming a single-stranded DNA molecule "
-        "(Biopython's molecular_weight, seq_type='DNA')."
+    "Non-standard bases": (
+        "Count of bases outside the standard A/C/G/T/U set, such as N or "
+        "other IUPAC ambiguity codes. Non-zero values flag positions where "
+        "other metrics may be unreliable."
     ),
 }
 
