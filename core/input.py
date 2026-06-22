@@ -16,7 +16,7 @@ Entrez.max_tries = 3
 Entrez.sleep_between_tries = 15
 
 
-def parse_fasta_file(uploaded_file):
+def parse_sequence_file(uploaded_file):
     """
     Parse a FASTA file uploaded via Streamlit.
 
@@ -30,15 +30,18 @@ def parse_fasta_file(uploaded_file):
         # Decode the uploaded bytes into a plain string
         content = uploaded_file.read().decode("utf-8")
 
+        # Detect format: GenBank flat files begin with a LOCUS line
+        fmt = "genbank" if content.lstrip().startswith("LOCUS") else "fasta"
+
         # Wrap the string in StringIO so SeqIO can treat it as a file
-        records = list(SeqIO.parse(StringIO(content), "fasta"))
+        records = list(SeqIO.parse(StringIO(content), fmt))
 
         if not records:
             return None
 
         return records
 
-    except Exception as e:
+    except Exception:
         return None
 
 
@@ -57,12 +60,12 @@ def fetch_from_ncbi(accession_number):
         handle = Entrez.efetch(
             db="nucleotide",
             id=accession_number,
-            rettype="fasta",
+            rettype="gb",
             retmode="text"
         )
 
         # Parse the response into SeqRecord objects
-        records = list(SeqIO.parse(handle, "fasta"))
+        records = list(SeqIO.parse(handle, "genbank"))
 
         # Always close the handle after use to free the connection
         handle.close()

@@ -3,7 +3,7 @@
 
 import streamlit as st
 
-from core.input import parse_fasta_file, fetch_from_ncbi
+from core.input import parse_sequence_file, fetch_from_ncbi
 from core.analysis import ANALYSES, scan_sirna_candidates, shortlist_candidates
 from core.llm import  build_opening_message, stream_converse, preflight
 
@@ -237,7 +237,7 @@ with st.expander(input_label, expanded=not sequence_loaded):
         st.markdown("**Upload a FASTA file**")
         uploaded_file = st.file_uploader(
             "Choose a FASTA file",
-            type=["fasta", "fa", "txt"],
+            type=["fasta", "fa", "gb", "txt"],
             label_visibility="collapsed",
             key=f"upload_{input_gen}",
         )
@@ -264,7 +264,7 @@ if uploaded_file is not None:
     # The uploader keeps its file across reruns; parse only when it's a
     # new file, not on every rerun.
     if uploaded_file.file_id != st.session_state.get("loaded_file_id"):
-        records = parse_fasta_file(uploaded_file)
+        records = parse_sequence_file(uploaded_file)
         if records is None:
             st.error(
                 "Could not parse the uploaded file. "
@@ -296,6 +296,16 @@ if "record" in st.session_state:
     # the stored record. Purely presentational.
     with st.container(border=True):
         st.markdown("**Sequence summary**")
+
+        organism = record.annotations.get("organism")
+        mol_type = record.annotations.get("molecule_type")
+        meta = []
+        if organism:
+            meta.append(f"Organism: {organism}")
+        if mol_type:
+            meta.append(f"Type: {mol_type}")
+        if meta:
+            st.caption(" · ".join(meta))
 
         # The FASTA description includes the ID as its first token; trim
         # it so the ID isn't shown twice.
