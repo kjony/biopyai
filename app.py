@@ -6,6 +6,10 @@ import streamlit as st
 from core.input import parse_sequence_file, fetch_from_ncbi
 from core.analysis import ANALYSES, scan_sirna_candidates, shortlist_candidates
 from core.llm import  build_opening_message, stream_converse, preflight
+from core.storage import init_db, save_sequence, list_sequences, get_sequence
+
+
+init_db()
 
 
 # Maps the intelligence layer's error codes to user-facing messages.
@@ -203,18 +207,25 @@ sequence_loaded = "record" in st.session_state
 # results sections run below, so a single pass reflects it — no rerun.
 # The input itself lives in an expander that defaults open when nothing is
 # loaded and recedes once a sequence is loaded.
-title_col, reset_col = st.columns([6, 1], vertical_alignment="bottom")
+title_col, save_col, reset_col = st.columns(
+    [6, 1, 1], vertical_alignment="bottom"
+)
 
 with title_col:
     st.subheader("Sequence Input")
 
+with save_col:
+    if sequence_loaded and st.button("Save"):
+        save_sequence(
+            st.session_state["record"],
+            st.session_state.get("source", "unknown"),
+        )
+        st.toast("Sequence saved")
+
 with reset_col:
     if sequence_loaded and st.button("Reset"):
-        for key in ("record", "sirna_candidates", "loaded_file_id", "conversation"):
+        for key in ("record", "sirna_candidates", "loaded_file_id", "conversation", "source"):
             st.session_state.pop(key, None)
-        # Bump the input generation so the uploader, accession box,
-        # analysis menu, and scan controls re-instantiate at their
-        # defaults (session-state alone can't clear a lingering upload).
         st.session_state["input_gen"] = (
             st.session_state.get("input_gen", 0) + 1
         )
@@ -225,11 +236,11 @@ input_label = (
     else "Provide a sequence"
 )
 
+
 # Generation counter — changing it re-instantiates the input widgets, the
 # analysis menu, and the scan controls at their defaults, which is how
 # Reset clears them.
 input_gen = st.session_state.get("input_gen", 0)
-
 
 with st.expander(input_label, expanded=not sequence_loaded):
     upload_col, fetch_col = st.columns(2)
@@ -273,6 +284,7 @@ if uploaded_file is not None:
             )
         else:
             st.session_state["loaded_file_id"] = uploaded_file.file_id
+            st.session_state["source"] = "upload"
             load_sequence(records[0])
 
 elif fetch_button and accession:
@@ -283,7 +295,26 @@ elif fetch_button and accession:
             "accession number and try again."
         )
     else:
+        st.session_state["source"] = f"NCBI:{accession}"
         load_sequence(records[0])
+
+saved = list_sequences()
+if saved:
+    with st.expander("Open a saved sequence"):
+        labels = {
+            f"{r['seq_id']} — {r['created_at']}": r for r in saved
+        }
+        choice = st.selectbox(
+            "Saved sequences", list(labels),
+            label_visibility="collapsed",
+        )
+        if st.button("Open"):
+            row = labels[choice]
+            reopened = get_sequence(row["id"])
+            if reopened is not None:
+                st.session_state["source"] = row["source"] or "saved"
+                load_sequence(reopened)
+                st.rerun()
 
 # --- Results and interpretation ---------------------------------------
 # Vertical flow: a full-width summary card, then Analysis (whole-sequence
