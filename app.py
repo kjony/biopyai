@@ -6,10 +6,10 @@ import streamlit as st
 from core.input import parse_sequence_file, fetch_from_ncbi
 from core.analysis import ANALYSES, scan_sirna_candidates, shortlist_candidates
 from core.llm import  build_opening_message, stream_converse, preflight
-from core.storage import init_db, save_sequence, list_sequences, get_sequence
-
-
-init_db()
+from core.storage import (
+    init_db, create_workflow, list_workflows,
+    get_workflow, update_workflow, delete_workflow,
+)
 
 
 # Maps the intelligence layer's error codes to user-facing messages.
@@ -30,6 +30,10 @@ LLM_ERROR_MESSAGES = {
     ),
 }
 
+
+init_db()
+
+
 def load_sequence(record):
     """Store a parsed SeqRecord in session state.
 
@@ -48,6 +52,8 @@ def load_sequence(record):
     st.session_state["record"] = record
     st.session_state.pop("sirna_candidates", None)
     st.session_state.pop("conversation", None)
+    st.session_state.pop("workflow_id", None)
+    st.session_state.pop("recipe", None)
 
 
 # Page configuration — must be the first Streamlit command
@@ -56,6 +62,35 @@ st.set_page_config(
     page_icon="🧬",
     layout="wide"
 )
+
+
+def format_recipe(recipe):
+    """Render an interpretation's analysis choices as a one-line caption.
+
+    States what was interpreted so a reopened workflow is self-describing
+    and the deterministic view behind it is trivial to reproduce.
+    """
+    subject = recipe.get("subject")
+    if subject == "whole_sequence":
+        metrics = ", ".join(recipe.get("metrics") or []) or "none"
+        return f"Interpreting whole-sequence metrics: {metrics}."
+    if subject == "single_candidate":
+        return (
+            f"Interpreting a single candidate · window "
+            f"{recipe['window']} nt · position {recipe['position']}."
+        )
+    if subject == "shortlist":
+        rules = recipe.get("required_rules") or []
+        rules_text = ", ".join(rules) if rules else "none"
+        order = recipe.get("order", "")
+        return (
+            f"Interpreting the shortlist · window {recipe['window']} nt · "
+            f"required rules: {rules_text} · sorted by "
+            f"{recipe['sort_key']} ({order.lower()}) · "
+            f"top {recipe['limit']}."
+        )
+    return ""
+
 
 
 # Per-metric method notes, surfaced as tooltips. They describe what each
@@ -216,15 +251,18 @@ with title_col:
 
 with save_col:
     if sequence_loaded and st.button("Save"):
-        save_sequence(
+        st.session_state["workflow_id"] = create_workflow(
             st.session_state["record"],
             st.session_state.get("source", "unknown"),
+            st.session_state.get("conversation"),
+            st.session_state.get("recipe"),
         )
-        st.toast("Sequence saved")
+        st.toast("Workflow saved")
 
 with reset_col:
     if sequence_loaded and st.button("Reset"):
-        for key in ("record", "sirna_candidates", "loaded_file_id", "conversation", "source"):
+        for key in ("record", "sirna_candidates", "loaded_file_id",
+                    "conversation", "source", "workflow_id", "recipe"):
             st.session_state.pop(key, None)
         st.session_state["input_gen"] = (
             st.session_state.get("input_gen", 0) + 1
@@ -298,22 +336,38 @@ elif fetch_button and accession:
         st.session_state["source"] = f"NCBI:{accession}"
         load_sequence(records[0])
 
-saved = list_sequences()
-if saved:
-    with st.expander("Open a saved sequence"):
+workflows = list_workflows()
+if workflows:
+    with st.expander("Open a saved workflow"):
         labels = {
-            f"{r['seq_id']} — {r['created_at']}": r for r in saved
+            f"{w['seq_id']} — updated {w['updated_at']}": w
+            for w in workflows
         }
         choice = st.selectbox(
-            "Saved sequences", list(labels),
+            "Saved workflows", list(labels),
             label_visibility="collapsed",
         )
-        if st.button("Open"):
-            row = labels[choice]
-            reopened = get_sequence(row["id"])
-            if reopened is not None:
-                st.session_state["source"] = row["source"] or "saved"
-                load_sequence(reopened)
+        open_col, delete_col = st.columns(2)
+        with open_col:
+            if st.button("Open", use_container_width=True):
+                row = labels[choice]
+                result = get_workflow(row["id"])
+                if result is not None:
+                    record, messages, recipe = result
+                    load_sequence(record)
+                    st.session_state["workflow_id"] = row["id"]
+                    st.session_state["source"] = row["source"] or "saved"
+                    if messages is not None:
+                        st.session_state["conversation"] = messages
+                    if recipe is not None:
+                        st.session_state["recipe"] = recipe
+                    st.rerun()
+        with delete_col:
+            if st.button("Delete", use_container_width=True):
+                delete_workflow(labels[choice]["id"])
+                if st.session_state.get("workflow_id") == labels[choice]["id"]:
+                    st.session_state.pop("workflow_id", None)
+                st.toast("Workflow deleted")
                 st.rerun()
 
 # --- Results and interpretation ---------------------------------------
@@ -512,6 +566,11 @@ if "record" in st.session_state:
         key=f"interp_subject_{input_gen}",
     )
 
+    # The recipe records the analysis choices behind an interpretation, so
+    # a reopened workflow can state — and the user can reproduce — exactly
+    # what was interpreted. Built alongside facts so the two never diverge.
+    recipe = None
+
     if subject == "A single candidate":
         if candidates:
             positions = [c["Position"] for c in candidates]
@@ -528,6 +587,11 @@ if "record" in st.session_state:
             )
             if facts:
                 st.caption(f"Position {pos}: {facts['Sequence']}")
+                recipe = {
+                    "subject": "single_candidate",
+                    "window": len(facts["Sequence"]),
+                    "position": int(pos),
+                }
         else:
             st.info("Run the candidate scan first to interpret one.")
             facts = None
@@ -535,11 +599,23 @@ if "record" in st.session_state:
         if shortlist:
             st.caption(f"{len(shortlist)} candidates in the shortlist.")
             facts = shortlist
+            recipe = {
+                "subject": "shortlist",
+                "window": len(shortlist[0]["Sequence"]),
+                "required_rules": required_rules,
+                "sort_key": sort_key,
+                "order": order,
+                "limit": int(limit),
+            }
         else:
             st.info("Build a shortlist first to interpret it.")
             facts = None
     else:
         facts = analyses
+        recipe = {
+            "subject": "whole_sequence",
+            "metrics": list(analyses.keys()),
+        }
 
 
     user_question = st.text_input(
@@ -564,6 +640,7 @@ if "record" in st.session_state:
 
     if clear:
         st.session_state.pop("conversation", None)
+        st.session_state.pop("recipe", None)
     
     if start:
         default = (
@@ -576,6 +653,7 @@ if "record" in st.session_state:
         st.session_state["conversation"] = [
             {"role": "user", "content": opening}
         ]
+        st.session_state["recipe"] = recipe
     
 
     # The grounded opening message is scaffolding, so display starts at
@@ -583,6 +661,10 @@ if "record" in st.session_state:
     # user's, produce the assistant's response now.
     conversation = st.session_state.get("conversation")
     if conversation:
+        active_recipe = st.session_state.get("recipe")
+        if active_recipe:
+            st.caption(format_recipe(active_recipe))
+
         for message in conversation[1:]:
             with st.chat_message(message["role"]):
                 st.markdown(message["content"])
@@ -599,6 +681,12 @@ if "record" in st.session_state:
                 conversation.append(
                     {"role": "assistant", "content": reply}
                 )
+                workflow_id = st.session_state.get("workflow_id")
+                if workflow_id is not None:
+                    update_workflow(
+                        workflow_id, conversation,
+                        st.session_state.get("recipe"),
+                    )
             else:
                 conversation.pop()
                 if not conversation:

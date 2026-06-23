@@ -47,6 +47,7 @@ def init_db():
                 molecule_type TEXT,
                 source        TEXT,
                 messages      TEXT,
+                recipe        TEXT,
                 created_at    TEXT NOT NULL,
                 updated_at    TEXT NOT NULL
             )
@@ -54,20 +55,21 @@ def init_db():
         )
 
 
-def create_workflow(record, source, messages=None):
+def create_workflow(record, source, messages=None, recipe=None):
     """Insert a new workflow. Returns the new row id.
 
     messages is the conversation list, or None when no interpretation
-    thread exists yet. It is JSON-encoded for storage.
+    thread exists yet. recipe is the small dict describing the analysis
+    choices behind that thread, or None. Both are JSON-encoded.
     """
     now = _now()
     with closing(_connect()) as conn, conn:
         cursor = conn.execute(
             """
             INSERT INTO workflows
-                (seq_id, description, sequence, organism,
-                 molecule_type, source, messages, created_at, updated_at)
-            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                (seq_id, description, sequence, organism, molecule_type,
+                 source, messages, recipe, created_at, updated_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
                 record.id,
@@ -77,6 +79,7 @@ def create_workflow(record, source, messages=None):
                 record.annotations.get("molecule_type"),
                 source,
                 json.dumps(messages) if messages is not None else None,
+                json.dumps(recipe) if recipe is not None else None,
                 now,
                 now,
             ),
@@ -104,8 +107,9 @@ def list_workflows():
 def get_workflow(workflow_id):
     """Rebuild a saved workflow by id.
 
-    Returns (SeqRecord, messages) where messages is the decoded
-    conversation list (or None), or returns None if no such row exists.
+    Returns (SeqRecord, messages, recipe) where messages is the decoded
+    conversation list (or None) and recipe is the decoded analysis-choice
+    dict (or None), or returns None if no such row exists.
     """
     with closing(_connect()) as conn:
         row = conn.execute(
@@ -126,16 +130,23 @@ def get_workflow(workflow_id):
         record.annotations["molecule_type"] = row["molecule_type"]
 
     messages = json.loads(row["messages"]) if row["messages"] else None
-    return record, messages
+    recipe = json.loads(row["recipe"]) if row["recipe"] else None
+    return record, messages, recipe
 
 
-def update_workflow(workflow_id, messages):
-    """Overwrite a workflow's conversation and bump updated_at."""
+def update_workflow(workflow_id, messages, recipe=None):
+    """Overwrite a workflow's conversation and recipe; bump updated_at.
+
+    Called on each new interpretation turn. The recipe is stable across a
+    thread, so it is re-written unchanged on follow-ups and only differs
+    when a new interpretation replaces the thread.
+    """
     with closing(_connect()) as conn, conn:
         conn.execute(
-            "UPDATE workflows SET messages = ?, updated_at = ? "
-            "WHERE id = ?",
+            "UPDATE workflows SET messages = ?, recipe = ?, "
+            "updated_at = ? WHERE id = ?",
             (json.dumps(messages) if messages is not None else None,
+             json.dumps(recipe) if recipe is not None else None,
              _now(), workflow_id),
         )
 
