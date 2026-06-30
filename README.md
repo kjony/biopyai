@@ -106,6 +106,8 @@ The deterministic core (`input.py`, `analysis.py`, `storage.py`) is light and ha
 Parked, in rough priority order:
 
 - **Packaging for two audiences** — a light, deterministic-only distribution (no model) for reproducible analysis and teaching, alongside the full local-LLM build.
+- **LAN exposure** — serve the app to other machines on the local network via browser (nothing to install on clients), so it can run on the GPU host and be reached from any laptop. Cheap and independent of the items below; note that with the current schema all connected users share one workflow pool.
+- **Multi-user workflows** — give each workflow an owner so a shared deployment partitions saved work per user. The live per-session state is already isolated; only the persistent layer needs identity. Prerequisite for true concurrency — and even then, the single GPU serializes interpretation across users. 
 - **Sequence viewer** — a positional overview (GC profile, candidate hits, annotated features on one axis) as the coherent home for visualization.
 - **Recipe auto-replay** — reopening a workflow could re-drive the analysis controls to their saved settings, not just display them.
 - **Multiple interpretation threads per workflow** — if the single-thread model proves limiting in real use.
