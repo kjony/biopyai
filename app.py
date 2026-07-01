@@ -195,8 +195,8 @@ CANDIDATE_COLUMN_CONFIG = {
 # Application header
 st.title("🧬 BioPyAI")
 st.markdown(
-    "A hybrid AI application for computational biology, combining "
-    "deterministic sequence analysis with language model reasoning to "
+    "A local-first, hybrid AI application for computational biology, combining "
+    "deterministic sequence analysis with locally-run language model reasoning to "
     "assist life science researchers."
 )
 
@@ -206,9 +206,9 @@ ABOUT = """\
 model to support scientific research, keeping computed facts and model
 interpretation in separate lanes.
 
-**How it works.** *Biopython* computes the exact, reproducible metrics (e.g - GC
-content, duplex Tm, sequence-rule flags, etc.). *Phi-4*, running locally through 
-*Ollama*, then interprets those verified numbers; it never computes or invents them. 
+**How it works.** *Biopython* computes the exact, reproducible metrics (e.g. GC
+content, duplex Tm, sequence-rule flags). *Phi-4*, running locally through 
+*Ollama*, then interprets those verified numbers rather than computing them.
 You stay in the loop: choose what to analyze and ask follow-ups grounded in the metrics.
 
 **Using it.** Provide a sequence by FASTA upload or NCBI accession, pick
@@ -217,14 +217,15 @@ whole-sequence or per-candidate metrics, scan the target for candidates
 any subject and continue the conversation.
 
 **What to trust, and what to check.** The metrics are computed and
-reproducible. The biology the model wraps around them (e.g - why an
-asymmetry value favours guide loading, what a GC window implies, etc.) 
+reproducible. The biology the model wraps around them (e.g. why an
+asymmetry value favors guide loading, what a GC window implies) 
 is its trained knowledge and can be incomplete or dated. Treat interpretations
 as a knowledgeable second opinion to verify, not a verdict; **this is a research
 and learning aid, not a clinical or therapeutic decision tool**.
 
-**Privacy.** Everything runs on your machine; sequences and conversations
-are never sent to an external service.
+**Privacy.** Everything runs on your machine. Sequences and conversations are not
+sent to an external AI service. The only outbound network call the app makes is the 
+optional NCBI fetch, when you choose to use it.
 """
 
 with st.expander("About BioPyAI"):
